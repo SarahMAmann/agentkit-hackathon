@@ -86,6 +86,7 @@ export default function Home() {
       />
 
       <div
+        className="page-container"
         style={{
           maxWidth: 1200,
           margin: "0 auto",
@@ -108,6 +109,7 @@ export default function Home() {
             Credence
           </div>
           <p
+            className="hero-headline"
             style={{
               fontFamily: "var(--font-display)",
               fontSize: 48,
@@ -122,6 +124,7 @@ export default function Home() {
             Verify once. Your agents carry the proof.
           </p>
           <p
+            className="hero-sub"
             style={{
               fontSize: 17,
               color: "var(--color-text-muted)",
@@ -143,6 +146,7 @@ export default function Home() {
             style={{ padding: "36px 32px 40px", position: "relative" }}
           >
             <div
+              className="step-bg-number"
               style={{
                 position: "absolute",
                 top: 12,
@@ -172,6 +176,7 @@ export default function Home() {
                 Step 1
               </div>
               <h2
+                className="step-heading"
                 style={{
                   fontFamily: "var(--font-display)",
                   fontSize: 24,
@@ -287,6 +292,7 @@ export default function Home() {
             style={{ padding: "36px 32px 40px", position: "relative" }}
           >
             <div
+              className="step-bg-number"
               style={{
                 position: "absolute",
                 top: 12,
@@ -316,6 +322,7 @@ export default function Home() {
                 Step 2
               </div>
               <h2
+                className="step-heading"
                 style={{
                   fontFamily: "var(--font-display)",
                   fontSize: 24,
@@ -387,6 +394,7 @@ export default function Home() {
             style={{ padding: "36px 32px 40px", position: "relative" }}
           >
             <div
+              className="step-bg-number"
               style={{
                 position: "absolute",
                 top: 12,
@@ -416,6 +424,7 @@ export default function Home() {
                 Step 3
               </div>
               <h2
+                className="step-heading"
                 style={{
                   fontFamily: "var(--font-display)",
                   fontSize: 24,
@@ -609,6 +618,7 @@ export default function Home() {
 
         {/* Agent section */}
         <section
+          className="agent-section"
           style={{
             marginTop: 48,
             padding: "32px 32px",
@@ -621,6 +631,7 @@ export default function Home() {
           }}
         >
           <div
+            className="agent-inner"
             style={{
               display: "grid",
               gridTemplateColumns: "1fr auto",
@@ -651,7 +662,7 @@ export default function Home() {
                 Credence verification agent over XMTP.
               </p>
             </div>
-            <div style={{ textAlign: "right" }}>
+            <div className="agent-right" style={{ textAlign: "right" }}>
               <div
                 style={{
                   fontSize: 12,

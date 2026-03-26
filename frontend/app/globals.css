@@ -58,6 +58,45 @@ body {
   .step-section {
     border-top: 1px solid var(--color-border);
   }
+
+  .agent-inner {
+    grid-template-columns: 1fr !important;
+  }
+
+  .agent-right {
+    text-align: left !important;
+  }
+}
+
+/* Responsive: tighten up on small screens */
+@media (max-width: 600px) {
+  .page-container {
+    padding: 32px 20px 64px !important;
+  }
+
+  .hero-headline {
+    font-size: 32px !important;
+  }
+
+  .hero-sub {
+    font-size: 15px !important;
+  }
+
+  .step-section {
+    padding: 28px 20px 32px !important;
+  }
+
+  .step-bg-number {
+    font-size: 80px !important;
+  }
+
+  .step-heading {
+    font-size: 20px !important;
+  }
+
+  .agent-section {
+    padding: 24px 20px !important;
+  }
 }
 
 /* Stagger animation for steps */
