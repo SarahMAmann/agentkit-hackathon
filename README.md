@@ -262,4 +262,4 @@ This runs the full three-agent flow over XMTP:
 
 ## Team
 
-Built by Sarah Amann at the Coinbase x World x XMTP hackathon.
+Built by Sarah Benson for the Coinbase x World x XMTP hackathon.
