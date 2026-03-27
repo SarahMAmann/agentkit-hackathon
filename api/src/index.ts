@@ -89,9 +89,26 @@ app.post("/v1/verify", async (req, res) => {
         .json({ error: "proof_id and world_id_nullifier are required" });
     }
 
-    // Step 1: Verify the Mirror proof via the existing Mirror API
+    // Step 1: Resolve share token to proof UUID if needed
+    // Mirror's UI gives users a short share token (e.g. "1cXjytUb") rather than the UUID
+    let resolvedProofId = proof_id;
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(proof_id);
+
+    if (!isUUID) {
+      const shareRes = await fetch(`${config.mirrorApiUrl}/verify/${proof_id}`);
+      if (!shareRes.ok) {
+        return res.status(400).json({ error: "Invalid proof ID or share token" });
+      }
+      const shareData = await shareRes.json();
+      if (!shareData.proof_id) {
+        return res.status(400).json({ error: "Could not resolve share token" });
+      }
+      resolvedProofId = shareData.proof_id;
+    }
+
+    // Step 2: Verify the Mirror proof via the existing Mirror API
     const mirrorRes = await fetch(
-      `${config.mirrorApiUrl}/v1/proofs/${proof_id}/verify`,
+      `${config.mirrorApiUrl}/v1/proofs/${resolvedProofId}/verify`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -144,6 +161,8 @@ app.get("/v1/credentials/:id/verify", (req, res) => {
 });
 
 // GET /api/premium-data — Demo protected endpoint
+// Simulates a real third-party API that verifies credentials via Credence's
+// x402-gated endpoint (paying $0.001 per lookup) before granting access.
 app.get("/api/premium-data", async (req, res) => {
   const credentialId = req.headers["x-credence-credential"] as string;
 
@@ -154,7 +173,15 @@ app.get("/api/premium-data", async (req, res) => {
     });
   }
 
-  const result = verifyCredential(credentialId);
+  // In production, this would be an x402-paid call to Credence's API.
+  // The consuming API pays $0.001 to verify the credential.
+  // For the demo, we call our own endpoint over HTTP to show the pattern.
+  const verifyUrl = `http://localhost:${config.port}/v1/credentials/${credentialId}/verify`;
+  console.log(`[premium-data] Verifying credential via ${verifyUrl}`);
+
+  const verifyRes = await fetch(verifyUrl);
+  const result = await verifyRes.json();
+
   if (!result.valid) {
     return res.status(403).json({
       error: "Invalid or expired credential",
@@ -162,10 +189,12 @@ app.get("/api/premium-data", async (req, res) => {
     });
   }
 
+  console.log(`[premium-data] Credential valid — granting access`);
+
   res.json({
     data: "This is premium financial data, only available to verified humans with proven financial standing.",
-    verified_human: result.credential!.human,
-    financial_standing: result.credential!.financial_standing,
+    verified_human: result.credential.human,
+    financial_standing: result.credential.financial_standing,
     timestamp: new Date().toISOString(),
   });
 });

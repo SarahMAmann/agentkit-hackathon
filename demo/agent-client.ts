@@ -6,22 +6,15 @@ import { Agent, createUser, createSigner, isText } from "@xmtp/agent-sdk";
 const CREDENCE_AGENT_ADDRESS =
   process.env.CREDENCE_AGENT_ADDRESS ||
   "0xadb866f13a1a07c6259b7c950049e82d1abe7b9b";
-const CREDENCE_API_URL =
-  process.env.CREDENCE_API_URL || "http://localhost:3002";
 
-// Accept proof_id and nullifier as CLI args: npx tsx agent-client.ts <proof_id> <nullifier>
-const PROOF_ID = process.argv[2] || process.env.PROOF_ID;
-const WORLD_NULLIFIER = process.argv[3] || process.env.WORLD_NULLIFIER;
+const CREDENTIAL_ID = process.argv[2] || process.env.CREDENTIAL_ID;
 
-if (!PROOF_ID || !WORLD_NULLIFIER) {
+if (!CREDENTIAL_ID) {
   console.error(
-    "\n  Usage: npx tsx agent-client.ts <proof_id> <world_nullifier>\n"
+    "\n  Usage: npx tsx agent-client.ts <credential_id>\n"
   );
   console.error(
-    "  Get a proof_id from app.mirrorzkp.com"
-  );
-  console.error(
-    "  Get a world_nullifier from the Credence frontend (World ID step)\n"
+    "  Get a credential_id by completing the flow at http://localhost:3000\n"
   );
   process.exit(1);
 }
@@ -37,43 +30,55 @@ const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 const RED = "\x1b[31m";
 const MAGENTA = "\x1b[35m";
+const WHITE = "\x1b[37m";
 
 function banner() {
   console.log();
-  console.log(`${CYAN}${BOLD}  ╔═══════════════════════════════════════════════╗${RESET}`);
-  console.log(`${CYAN}${BOLD}  ║           CREDENCE  ·  AGENT DEMO            ║${RESET}`);
-  console.log(`${CYAN}${BOLD}  ╚═══════════════════════════════════════════════╝${RESET}`);
+  console.log(
+    `${CYAN}${BOLD}  ╔═══════════════════════════════════════════════════════════╗${RESET}`
+  );
+  console.log(
+    `${CYAN}${BOLD}  ║                CREDENCE  ·  AGENT DEMO                   ║${RESET}`
+  );
+  console.log(
+    `${CYAN}${BOLD}  ╚═══════════════════════════════════════════════════════════╝${RESET}`
+  );
   console.log();
-  console.log(`${DIM}  Simulating an AI agent that obtains a Credence${RESET}`);
-  console.log(`${DIM}  credential via XMTP, then uses it to access a${RESET}`);
-  console.log(`${DIM}  protected API — all programmatically.${RESET}`);
+  console.log(
+    `${DIM}  Three AI agents communicate over XMTP:${RESET}`
+  );
+  console.log(
+    `${DIM}  ${RESET}${BOLD}Agent A${RESET}${DIM} (user's agent) wants access to a premium API${RESET}`
+  );
+  console.log(
+    `${DIM}  ${RESET}${BOLD}Agent B${RESET}${DIM} (API provider) gates access with Credence${RESET}`
+  );
+  console.log(
+    `${DIM}  ${RESET}${BOLD}Agent C${RESET}${DIM} (Credence) verifies credentials for $0.001 via x402${RESET}`
+  );
   console.log();
 }
 
-function step(n: number, label: string) {
-  console.log(`${BOLD}${BLUE}  [${ n }]${RESET} ${BOLD}${label}${RESET}`);
+function agentLabel(name: string, color: string) {
+  return `${color}${BOLD}[${name}]${RESET}`;
 }
 
-function info(msg: string) {
-  console.log(`${DIM}      ${msg}${RESET}`);
+function msg(from: string, to: string, fromColor: string, toColor: string, text: string) {
+  console.log(
+    `  ${fromColor}${BOLD}${from}${RESET} ${DIM}→${RESET} ${toColor}${BOLD}${to}${RESET}${DIM} (XMTP)${RESET}`
+  );
+  console.log(`  ${DIM}  "${text}"${RESET}`);
+  console.log();
 }
 
-function success(msg: string) {
-  console.log(`${GREEN}${BOLD}      ${msg}${RESET}`);
+function status(agent: string, color: string, text: string) {
+  console.log(`  ${color}${BOLD}[${agent}]${RESET} ${text}`);
 }
 
-function warn(msg: string) {
-  console.log(`${YELLOW}      ${msg}${RESET}`);
-}
-
-function fail(msg: string) {
-  console.log(`${RED}${BOLD}      ${msg}${RESET}`);
-}
-
-function json(obj: any) {
+function data(obj: any) {
   const lines = JSON.stringify(obj, null, 2).split("\n");
   for (const line of lines) {
-    console.log(`${MAGENTA}      ${line}${RESET}`);
+    console.log(`  ${MAGENTA}  ${line}${RESET}`);
   }
 }
 
@@ -81,152 +86,216 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Wait for a reply from a specific agent in a DM conversation
+async function waitForReply(
+  dm: any,
+  myInboxId: string,
+  timeoutMs = 30000
+): Promise<string> {
+  const seenIds = new Set<string>();
+  // Mark existing messages as seen
+  const existing = await dm.messages({ limit: 50 });
+  for (const m of existing) seenIds.add(m.id);
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    await dm.sync();
+    const messages = await dm.messages({ limit: 50 });
+
+    for (const m of messages) {
+      if (seenIds.has(m.id)) continue;
+      seenIds.add(m.id);
+      if (m.senderInboxId === myInboxId) continue;
+      if (!isText(m)) continue;
+      return m.content as string;
+    }
+  }
+  throw new Error("Timeout waiting for reply");
+}
+
 // ── Main ────────────────────────────────────────────────────────────────
 
 async function main() {
   banner();
 
-  // ── Step 1: Create ephemeral XMTP identity ───────────────────────────
-  step(1, "Creating ephemeral XMTP identity...");
+  const A_COLOR = BLUE;
+  const B_COLOR = YELLOW;
+  const C_COLOR = CYAN;
 
-  const user = createUser();
-  const signer = createSigner(user);
+  // ── Create agents A and B ─────────────────────────────────────────────
 
-  const agent = await Agent.create(signer, { env: "dev" });
-  await agent.start();
+  status("Setup", DIM, "Creating ephemeral XMTP agents...");
+  console.log();
 
-  info(`Agent address: ${user.account.address}`);
-  info(`Credence agent: ${CREDENCE_AGENT_ADDRESS}`);
-  success("XMTP client connected\n");
+  const userA = createUser();
+  const signerA = createSigner(userA);
+  const agentA = await Agent.create(signerA, { env: "dev" });
+  await agentA.start();
 
-  await sleep(500);
+  const userB = createUser();
+  const signerB = createSigner(userB);
+  const agentB = await Agent.create(signerB, { env: "dev" });
+  await agentB.start();
 
-  // ── Step 2: Open DM with Credence agent ───────────────────────────────
-  step(2, "Opening DM with Credence verification agent...");
+  status("Agent A", A_COLOR, `User's agent — ${userA.account.address.slice(0, 10)}...`);
+  status("Agent B", B_COLOR, `API provider — ${userB.account.address.slice(0, 10)}...`);
+  status("Agent C", C_COLOR, `Credence agent — ${CREDENCE_AGENT_ADDRESS.slice(0, 10)}...`);
+  console.log();
 
-  const dm = await agent.createDmWithAddress(CREDENCE_AGENT_ADDRESS as `0x${string}`);
+  await sleep(1000);
 
-  success(`Conversation created: ${dm.id.slice(0, 12)}...\n`);
+  // ── Step 1: A → B ─────────────────────────────────────────────────────
 
-  await sleep(500);
-
-  // ── Step 3: Send verify command ───────────────────────────────────────
-  step(3, "Sending verification request...");
-
-  const command = `verify ${PROOF_ID} ${WORLD_NULLIFIER}`;
-  info(`> ${command}`);
-
-  await dm.sendText(command);
-  success("Message sent, waiting for response...\n");
-
-  // ── Step 4: Wait for agent response ───────────────────────────────────
-  step(4, "Waiting for Credence agent reply...");
-
-  let credentialId: string | null = null;
-  const seenIds = new Set<string>();
-
-  // Poll for new messages (the agent should reply within a few seconds)
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    await sleep(2000);
-    await dm.sync();
-    const messages = await dm.messages({ limit: 10 });
-
-    for (const msg of messages) {
-      if (msg.senderInboxId === agent.client.inboxId) continue;
-      if (!isText(msg)) continue;
-      if (seenIds.has(msg.id)) continue;
-      seenIds.add(msg.id);
-
-      const text = msg.content as string;
-
-      // Print each line of the response
-      for (const line of text.split("\n")) {
-        if (line.trim()) info(`< ${line}`);
-      }
-
-      // Extract credential_id
-      const match = text.match(/Credential ID: (.+)/);
-      if (match) {
-        credentialId = match[1].trim();
-      }
-    }
-
-    if (credentialId) break;
-  }
-
-  if (!credentialId) {
-    fail("No credential received within timeout.");
-    process.exit(1);
-  }
-
-  success(`Credential received: ${credentialId}\n`);
-
-  await sleep(500);
-
-  // ── Step 5: Verify credential via x402-gated endpoint ─────────────────
-  step(5, "Verifying credential via Credence API (x402-gated in production)...");
-
-  info(`GET ${CREDENCE_API_URL}/v1/credentials/${credentialId}/verify`);
-
-  const verifyRes = await fetch(
-    `${CREDENCE_API_URL}/v1/credentials/${credentialId}/verify`
+  console.log(
+    `${BOLD}  ── Step 1: Agent A requests access from Agent B ──${RESET}`
   );
-  const verifyData = await verifyRes.json();
+  console.log();
 
-  json(verifyData);
+  const dmAB = await agentA.createDmWithAddress(
+    userB.account.address as `0x${string}`
+  );
 
-  if (verifyData.valid) {
-    success("Credential is valid\n");
-  } else {
-    fail(`Credential invalid: ${verifyData.reason}\n`);
+  const requestMsg = `access premium-data ${CREDENTIAL_ID}`;
+  msg("Agent A", "Agent B", A_COLOR, B_COLOR, requestMsg);
+
+  await dmAB.sendText(requestMsg);
+
+  await sleep(1500);
+
+  // ── Step 2: B receives, messages C to verify ──────────────────────────
+
+  console.log(
+    `${BOLD}  ── Step 2: Agent B asks Credence to verify ──${RESET}`
+  );
+  console.log();
+
+  // B receives A's message (we know what it is, simulate B's logic)
+  status("Agent B", B_COLOR, "Received access request. Verifying credential with Credence...");
+  console.log();
+
+  const dmBC = await agentB.createDmWithAddress(
+    CREDENCE_AGENT_ADDRESS as `0x${string}`
+  );
+
+  const checkMsg = `check-credential ${CREDENTIAL_ID}`;
+  msg("Agent B", "Agent C", B_COLOR, C_COLOR, checkMsg);
+
+  status("Agent B", B_COLOR, `${DIM}(In production, B pays $0.001 USDC via x402 for this verification)${RESET}`);
+  console.log();
+
+  await dmBC.sendText(checkMsg);
+
+  // ── Step 3: C verifies and responds to B ──────────────────────────────
+
+  console.log(
+    `${BOLD}  ── Step 3: Credence verifies and responds ──${RESET}`
+  );
+  console.log();
+
+  status("Agent C", C_COLOR, "Checking credential against Credence API...");
+  console.log();
+
+  const cReply = await waitForReply(dmBC, agentB.client.inboxId);
+
+  msg("Agent C", "Agent B", C_COLOR, B_COLOR, cReply.split("\n")[0]);
+
+  // Parse the response
+  const isValid = cReply.includes("CREDENTIAL_VALID");
+
+  if (!isValid) {
+    status("Agent B", B_COLOR, `${RED}Credential invalid. Denying access to Agent A.${RESET}`);
+    await agentA.stop();
+    await agentB.stop();
     process.exit(1);
   }
 
-  await sleep(500);
-
-  // ── Step 6: Access protected API ──────────────────────────────────────
-  step(6, "Accessing protected API with credential...");
-
-  info(`GET ${CREDENCE_API_URL}/api/premium-data`);
-  info(`X-Credence-Credential: ${credentialId}`);
-
-  const dataRes = await fetch(`${CREDENCE_API_URL}/api/premium-data`, {
-    headers: { "X-Credence-Credential": credentialId },
-  });
-  const data = await dataRes.json();
-
-  console.log();
-  json(data);
-
-  if (dataRes.ok) {
-    console.log();
-    success("Access granted. Full demo complete.");
-  } else {
-    console.log();
-    fail("Access denied.");
+  // Print full verification details
+  for (const line of cReply.split("\n").slice(1)) {
+    if (line.trim()) console.log(`  ${GREEN}  ${line.trim()}${RESET}`);
   }
-
-  // ── Done ──────────────────────────────────────────────────────────────
-  console.log();
-  console.log(`${CYAN}${BOLD}  ╔═══════════════════════════════════════════════╗${RESET}`);
-  console.log(`${CYAN}${BOLD}  ║              DEMO COMPLETE                    ║${RESET}`);
-  console.log(`${CYAN}${BOLD}  ╠═══════════════════════════════════════════════╣${RESET}`);
-  console.log(`${CYAN}  ║                                               ║${RESET}`);
-  console.log(`${CYAN}  ║${RESET}  World ID    ${GREEN}verified${RESET}  ${DIM}(unique human)${RESET}        ${CYAN}║${RESET}`);
-  console.log(`${CYAN}  ║${RESET}  Mirror ZKP  ${GREEN}verified${RESET}  ${DIM}(financial standing)${RESET} ${CYAN}║${RESET}`);
-  console.log(`${CYAN}  ║${RESET}  Credential  ${GREEN}issued${RESET}    ${DIM}(via XMTP agent)${RESET}    ${CYAN}║${RESET}`);
-  console.log(`${CYAN}  ║${RESET}  API access  ${GREEN}granted${RESET}   ${DIM}(x402 verified)${RESET}     ${CYAN}║${RESET}`);
-  console.log(`${CYAN}  ║                                               ║${RESET}`);
-  console.log(`${CYAN}${BOLD}  ╚═══════════════════════════════════════════════╝${RESET}`);
   console.log();
 
-  await agent.stop();
+  await sleep(1000);
+
+  // ── Step 4: B grants access and sends data to A ───────────────────────
+
+  console.log(
+    `${BOLD}  ── Step 4: Agent B grants access to Agent A ──${RESET}`
+  );
+  console.log();
+
+  status("Agent B", B_COLOR, "Credential verified. Preparing premium data...");
+  console.log();
+
+  const premiumData = {
+    status: "access_granted",
+    data: "Premium financial data — only for verified humans with proven financial standing.",
+    verified: { human: true, financial_standing: true },
+    timestamp: new Date().toISOString(),
+  };
+
+  const responseMsg = `ACCESS_GRANTED\n${JSON.stringify(premiumData, null, 2)}`;
+
+  // B sends response to A via XMTP
+  const dmBA = await agentB.createDmWithAddress(
+    userA.account.address as `0x${string}`
+  );
+  await dmBA.sendText(responseMsg);
+
+  msg("Agent B", "Agent A", B_COLOR, A_COLOR, "ACCESS_GRANTED");
+  data(premiumData);
+  console.log();
+
+  await sleep(800);
+
+  // ── Summary ───────────────────────────────────────────────────────────
+
+  console.log(
+    `${CYAN}${BOLD}  ╔═══════════════════════════════════════════════════════════╗${RESET}`
+  );
+  console.log(
+    `${CYAN}${BOLD}  ║                      FLOW COMPLETE                        ║${RESET}`
+  );
+  console.log(
+    `${CYAN}${BOLD}  ╠═══════════════════════════════════════════════════════════╣${RESET}`
+  );
+  console.log(
+    `${CYAN}  ║                                                             ║${RESET}`
+  );
+  console.log(
+    `${CYAN}  ║${RESET}  ${A_COLOR}Agent A${RESET} requested access from ${B_COLOR}Agent B${RESET}         ${DIM}(XMTP)${RESET}  ${CYAN}║${RESET}`
+  );
+  console.log(
+    `${CYAN}  ║${RESET}  ${B_COLOR}Agent B${RESET} asked ${C_COLOR}Credence${RESET} to verify credential  ${DIM}(XMTP)${RESET}  ${CYAN}║${RESET}`
+  );
+  console.log(
+    `${CYAN}  ║${RESET}  ${C_COLOR}Credence${RESET} confirmed: human + financial standing ${DIM}(x402)${RESET}  ${CYAN}║${RESET}`
+  );
+  console.log(
+    `${CYAN}  ║${RESET}  ${B_COLOR}Agent B${RESET} granted access to ${A_COLOR}Agent A${RESET}             ${DIM}(XMTP)${RESET}  ${CYAN}║${RESET}`
+  );
+  console.log(
+    `${CYAN}  ║                                                             ║${RESET}`
+  );
+  console.log(
+    `${CYAN}  ║${RESET}  ${DIM}3 agents · 3 XMTP conversations · 1 x402 micropayment${RESET}    ${CYAN}║${RESET}`
+  );
+  console.log(
+    `${CYAN}  ║                                                             ║${RESET}`
+  );
+  console.log(
+    `${CYAN}${BOLD}  ╚═══════════════════════════════════════════════════════════╝${RESET}`
+  );
+  console.log();
+
+  await agentA.stop();
+  await agentB.stop();
   process.exit(0);
 }
 
 main().catch((err) => {
-  fail(`Demo failed: ${err.message}`);
+  console.error(`${RED}${BOLD}  Demo failed: ${err.message}${RESET}`);
   console.error(err);
   process.exit(1);
 });
