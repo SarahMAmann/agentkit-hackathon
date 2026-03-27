@@ -1,5 +1,6 @@
 import "dotenv/config";
-import { Agent, createUser, createSigner, isText } from "@xmtp/agent-sdk";
+import { Agent, createUser, createSigner } from "@xmtp/agent-sdk";
+import { verifyCredentialOverXMTP } from "../sdk/src/xmtp.js";
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -86,34 +87,6 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// Wait for a reply from a specific agent in a DM conversation
-async function waitForReply(
-  dm: any,
-  myInboxId: string,
-  timeoutMs = 30000
-): Promise<string> {
-  const seenIds = new Set<string>();
-  // Mark existing messages as seen
-  const existing = await dm.messages({ limit: 50 });
-  for (const m of existing) seenIds.add(m.id);
-
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await sleep(2000);
-    await dm.sync();
-    const messages = await dm.messages({ limit: 50 });
-
-    for (const m of messages) {
-      if (seenIds.has(m.id)) continue;
-      seenIds.add(m.id);
-      if (m.senderInboxId === myInboxId) continue;
-      if (!isText(m)) continue;
-      return m.content as string;
-    }
-  }
-  throw new Error("Timeout waiting for reply");
-}
-
 // ── Main ────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -163,57 +136,48 @@ async function main() {
 
   await sleep(1500);
 
-  // ── Step 2: B receives, messages C to verify ──────────────────────────
+  // ── Step 2: B verifies credential with Credence via XMTP ───────────
 
   console.log(
-    `${BOLD}  ── Step 2: Agent B asks Credence to verify ──${RESET}`
+    `${BOLD}  ── Step 2: Agent B verifies credential with Credence ──${RESET}`
   );
   console.log();
 
-  // B receives A's message (we know what it is, simulate B's logic)
   status("Agent B", B_COLOR, "Received access request. Verifying credential with Credence...");
+  status("Agent B", B_COLOR, `Using ${CYAN}verifyCredentialOverXMTP()${RESET} from credence-gate SDK`);
   console.log();
 
-  const dmBC = await agentB.createDmWithAddress(
-    CREDENCE_AGENT_ADDRESS as `0x${string}`
-  );
-
-  const checkMsg = `check-credential ${CREDENTIAL_ID}`;
-  msg("Agent B", "Agent C", B_COLOR, C_COLOR, checkMsg);
+  msg("Agent B", "Agent C", B_COLOR, C_COLOR, `check-credential ${CREDENTIAL_ID}`);
 
   status("Agent B", B_COLOR, `${DIM}(In production, B pays $0.001 USDC via x402 for this verification)${RESET}`);
   console.log();
 
-  await dmBC.sendText(checkMsg);
+  // This is the SDK call — one line for Agent B to verify via Credence over XMTP
+  const verification = await verifyCredentialOverXMTP(
+    agentB,
+    CREDENTIAL_ID,
+    { agentAddress: CREDENCE_AGENT_ADDRESS }
+  );
 
-  // ── Step 3: C verifies and responds to B ──────────────────────────────
+  // ── Step 3: Credence responds ─────────────────────────────────────────
 
   console.log(
     `${BOLD}  ── Step 3: Credence verifies and responds ──${RESET}`
   );
   console.log();
 
-  status("Agent C", C_COLOR, "Checking credential against Credence API...");
-  console.log();
-
-  const cReply = await waitForReply(dmBC, agentB.client.inboxId);
-
-  msg("Agent C", "Agent B", C_COLOR, B_COLOR, cReply.split("\n")[0]);
-
-  // Parse the response
-  const isValid = cReply.includes("CREDENTIAL_VALID");
-
-  if (!isValid) {
+  if (!verification.valid) {
+    msg("Agent C", "Agent B", C_COLOR, B_COLOR, `CREDENTIAL_INVALID: ${verification.reason}`);
     status("Agent B", B_COLOR, `${RED}Credential invalid. Denying access to Agent A.${RESET}`);
     await agentA.stop();
     await agentB.stop();
     process.exit(1);
   }
 
-  // Print full verification details
-  for (const line of cReply.split("\n").slice(1)) {
-    if (line.trim()) console.log(`  ${GREEN}  ${line.trim()}${RESET}`);
-  }
+  msg("Agent C", "Agent B", C_COLOR, B_COLOR, "CREDENTIAL_VALID");
+  console.log(`  ${GREEN}  human: ${verification.human}${RESET}`);
+  console.log(`  ${GREEN}  financial_standing: ${verification.financial_standing}${RESET}`);
+  console.log(`  ${GREEN}  expires_at: ${verification.expires_at}${RESET}`);
   console.log();
 
   await sleep(1000);

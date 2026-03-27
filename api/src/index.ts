@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { config } from "./config.js";
 import { issueCredential, verifyCredential } from "./credentials.js";
+import { credenceGate } from "../../sdk/src/index.js";
 
 const app = express();
 
@@ -161,43 +162,22 @@ app.get("/v1/credentials/:id/verify", (req, res) => {
 });
 
 // GET /api/premium-data — Demo protected endpoint
-// Simulates a real third-party API that verifies credentials via Credence's
-// x402-gated endpoint (paying $0.001 per lookup) before granting access.
-app.get("/api/premium-data", async (req, res) => {
-  const credentialId = req.headers["x-credence-credential"] as string;
-
-  if (!credentialId) {
-    return res.status(403).json({
-      error: "Credential required",
-      hint: "Get verified via the Credence XMTP agent or at our demo page",
+// Shows how a third-party API uses credence-gate to protect an endpoint.
+// This is exactly what a real customer (Agent B) would do:
+app.get(
+  "/api/premium-data",
+  credenceGate({
+    apiUrl: `http://localhost:${config.port}`,
+  }),
+  (req, res) => {
+    res.json({
+      data: "This is premium financial data, only available to verified humans with proven financial standing.",
+      verified_human: req.credence!.human,
+      financial_standing: req.credence!.financial_standing,
+      timestamp: new Date().toISOString(),
     });
   }
-
-  // In production, this would be an x402-paid call to Credence's API.
-  // The consuming API pays $0.001 to verify the credential.
-  // For the demo, we call our own endpoint over HTTP to show the pattern.
-  const verifyUrl = `http://localhost:${config.port}/v1/credentials/${credentialId}/verify`;
-  console.log(`[premium-data] Verifying credential via ${verifyUrl}`);
-
-  const verifyRes = await fetch(verifyUrl);
-  const result = await verifyRes.json();
-
-  if (!result.valid) {
-    return res.status(403).json({
-      error: "Invalid or expired credential",
-      reason: result.reason,
-    });
-  }
-
-  console.log(`[premium-data] Credential valid — granting access`);
-
-  res.json({
-    data: "This is premium financial data, only available to verified humans with proven financial standing.",
-    verified_human: result.credential.human,
-    financial_standing: result.credential.financial_standing,
-    timestamp: new Date().toISOString(),
-  });
-});
+);
 
 // --- Start ---
 

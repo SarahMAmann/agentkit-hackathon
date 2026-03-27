@@ -1,0 +1,43 @@
+{
+  "name": "credence-gate",
+  "version": "0.1.0",
+  "description": "Gate API endpoints and XMTP agents with Credence verified credentials",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./xmtp": "./dist/xmtp.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "credence",
+    "x402",
+    "verification",
+    "middleware",
+    "express",
+    "world-id",
+    "zkp"
+  ],
+  "peerDependencies": {
+    "@xmtp/agent-sdk": "^2.0.0",
+    "express": "^4.0.0 || ^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    },
+    "@xmtp/agent-sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.0",
+    "@types/node": "^20.0.0",
+    "@xmtp/agent-sdk": "^2.3.0",
+    "typescript": "^5.0.0"
+  }
+}
